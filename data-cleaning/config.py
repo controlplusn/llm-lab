@@ -15,6 +15,7 @@ CONFIG = {
 
     # ── Length filter ─────────────────────────────────────────
     # Word count  Adjust based on the word length calculation
+    "min_words": 75,
     "max_words": 10_000,
 
     # Character-level
