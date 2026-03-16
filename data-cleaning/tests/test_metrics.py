@@ -9,11 +9,11 @@ def test_length_filter_pass_rate(cleaner, sample_texts):
  
     lengths = np.array([len(t.split()) for t in passed])
     print(f"\n  --- length_filter ---")
-    print(f"  Pass rate        : {rate:.1%}")
-    print(f"  Passed           : {len(passed):,} / {len(sample_texts):,}")
-    print(f"  Word count mean  : {lengths.mean():.0f}")
-    print(f"  Word count min   : {lengths.min()}")
-    print(f"  Word count max   : {lengths.max()}")
+    print(f" Pass rate : {rate:.1%}")
+    print(f" Passed: {len(passed):,} / {len(sample_texts):,}")
+    print(f" Word count mean: {lengths.mean():.0f}")
+    print(f" Word count min: {lengths.min()}")
+    print(f" Word count max: {lengths.max()}")
  
     # FineWeb is pre-filtered — expect most docs to pass
     assert 0.5 <= rate <= 1.0, (
@@ -30,9 +30,9 @@ def test_repetition_filter_pass_rate(cleaner, sample_texts):
     rate   = len(passed) / len(sample_texts)
  
     print("\n  --- repetition_filter ---")
-    print(f"  Pass rate        : {rate:.1%}")
-    print(f"  Passed           : {len(passed):,} / {len(sample_texts):,}")
-    print(f"  Filtered out     : {len(sample_texts) - len(passed):,}")
+    print(f" Pass rate : {rate:.1%}")
+    print(f" Passed : {len(passed):,} / {len(sample_texts):,}")
+    print(f" Filtered out : {len(sample_texts) - len(passed):,}")
  
     # FineWeb is already fairly clean — high pass rate expected
     assert 0.7 <= rate <= 1.0, (
@@ -52,8 +52,8 @@ def test_pii_scrubbing_hit_rate(cleaner, sample_texts):
     rate = hits / len(sample_texts)
  
     print("\n  --- pii_scrubbing ---")
-    print(f"  Docs with PII found : {hits:,} / {len(sample_texts):,}")
-    print(f"  PII hit rate        : {rate:.1%}")
+    print(f" Docs with PII found: {hits:,} / {len(sample_texts):,}")
+    print(f" PII hit rate : {rate:.1%}")
  
     # FineWeb contains some PII — expect a small but non-zero hit rate
     # No hard assert here — just report so you can tune patterns
@@ -68,10 +68,10 @@ def test_deduplication_removal_rate(cleaner, sample_texts):
     rate    = removed / len(sample_texts)
  
     print("\n  --- deduplicate ---")
-    print(f"  Input docs       : {len(sample_texts):,}")
-    print(f"  Unique docs kept : {len(results):,}")
-    print(f"  Duplicates found : {removed:,}")
-    print(f"  Removal rate     : {rate:.1%}")
+    print(f" Input docs : {len(sample_texts):,}")
+    print(f" Unique docs kept : {len(results):,}")
+    print(f" Duplicates found : {removed:,}")
+    print(f" Removal rate : {rate:.1%}")
  
     # FineWeb is pre-deduped — expect very few duplicates in 1k sample
     assert rate < 0.2, (
@@ -89,8 +89,8 @@ def test_final_normalization_does_not_empty_docs(cleaner, sample_texts):
     rate = len(emptied) / len(sample_texts)
  
     print("\n  --- final_normalization ---")
-    print(f"  Docs emptied after norm : {len(emptied):,} / {len(sample_texts):,}")
-    print(f"  Emptied rate            : {rate:.1%}")
+    print(f" Docs emptied after norm : {len(emptied):,} / {len(sample_texts):,}")
+    print(f" Emptied rate : {rate:.1%}")
  
     assert rate < 0.01, (
         f"final_normalization is emptying {rate:.1%} of docs — "
@@ -109,13 +109,13 @@ def test_full_pipeline_pass_rate(cleaner, sample_texts):
     lengths = np.array([len(t.split()) for t in passed])
  
     print(f"\n  --- full clean() pipeline ---")
-    print(f"  Input docs       : {len(sample_texts):,}")
-    print(f"  Passed           : {len(passed):,}")
-    print(f"  Filtered out     : {len(sample_texts) - len(passed):,}")
-    print(f"  Pass rate        : {rate:.1%}")
-    print(f"  Word count mean  : {lengths.mean():.0f}")
-    print(f"  Word count P5    : {np.percentile(lengths, 5):.0f}")
-    print(f"  Word count P95   : {np.percentile(lengths, 95):.0f}")
+    print(f" Input docs : {len(sample_texts):,}")
+    print(f" Passed : {len(passed):,}")
+    print(f" Filtered out : {len(sample_texts) - len(passed):,}")
+    print(f" Pass rate : {rate:.1%}")
+    print(f" Word count mean : {lengths.mean():.0f}")
+    print(f" Word count P5 : {np.percentile(lengths, 5):.0f}")
+    print(f" Word count P95 : {np.percentile(lengths, 95):.0f}")
  
     # Pipeline should not be so aggressive it removes most of FineWeb
     assert rate > 0.3, (
@@ -136,12 +136,12 @@ def test_word_count_distribution_after_cleaning(cleaner, sample_texts):
     lengths = np.array([len(t.split()) for t in passed])
  
     print("\n  --- word count distribution (post-clean) ---")
-    print(f"  Mean             : {lengths.mean():.0f} words")
-    print(f"  Median           : {np.median(lengths):.0f} words")
-    print(f"  P5               : {np.percentile(lengths, 5):.0f} words")
-    print(f"  P95              : {np.percentile(lengths, 95):.0f} words")
-    print(f"  Min              : {lengths.min()} words")
-    print(f"  Max              : {lengths.max()} words")
+    print(f" Mean : {lengths.mean():.0f} words")
+    print(f" Median : {np.median(lengths):.0f} words")
+    print(f" P5 : {np.percentile(lengths, 5):.0f} words")
+    print(f" P95 : {np.percentile(lengths, 95):.0f} words")
+    print(f" Min : {lengths.min()} words")
+    print(f" Max : {lengths.max()} words")
  
     # After cleaning, average doc should be a reasonable length
     assert lengths.mean() > 50, \
