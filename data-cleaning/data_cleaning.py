@@ -63,18 +63,19 @@ class DataCleaning:
         
 
         # ── 3. Line-level heuristics ──────────────────────
-        if line_count < self.config["min_lines"]:
-            return False
+        if line_count > 1:
+            if line_count < self.config["min_lines"]:
+                return False
 
-        if line_count > self.config["max_lines"]:
-            return False 
+            if line_count > self.config["max_lines"]:
+                return False 
 
-        avg_words_per_line = word_count / line_count
-        if avg_words_per_line < self.config["min_avg_words_per_line"]:
-            return False
+            avg_words_per_line = word_count / line_count
+            if avg_words_per_line < self.config["min_avg_words_per_line"]:
+                return False
 
-        if avg_words_per_line > self.config["max_avg_words_per_line"]:
-            return False
+            if avg_words_per_line > self.config["max_avg_words_per_line"]:
+                return False
 
         return True
 

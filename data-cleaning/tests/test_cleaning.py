@@ -69,8 +69,9 @@ def test_length_url_heavy(cleaner):
 # Line-level
 def test_length_too_few_lines(cleaner):
     # All words on one line — wall of text
-    assert cleaner.length_filter("word " * 200) is False
- 
+    text = "word " * 100 + "\n" + "word " * 100
+    assert cleaner.length_filter(text) is False
+
 def test_length_valid_multiline(cleaner):
     text = "\n".join(
         ["This is a normal sentence with enough words here."] * 20
