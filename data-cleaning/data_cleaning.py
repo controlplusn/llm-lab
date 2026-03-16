@@ -295,8 +295,8 @@ class DataCleaning:
         """
 
         if self.config.get("norm_collapse_puncts", True):
-            text = re.sub(r'([!?.]){2,}', r'\1', text)
-            text = re.sub(r'\.{4,}',      '...',  text)
+            text = re.sub(r'\.{4,}', '...',  text)
+            text = re.sub(r'([!?]){2,}', r'\1', text)
 
         if self.config.get("norm_collapse_newlines", True):
             text = re.sub(r'\n{3,}', '\n\n', text)
