@@ -245,7 +245,10 @@ class DataCleaning:
 
         print("\n  [Deduplication] Building MinHash LSH index...")
 
-        lsh     = MinHashLSH(
+        if not texts:
+            return []
+
+        lsh = MinHashLSH(
             threshold=self.config["minhash_threshold"],
             num_perm=self.config["minhash_num_perm"]
         )

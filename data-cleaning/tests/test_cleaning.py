@@ -222,10 +222,21 @@ def test_dedup_removes_exact_duplicates(cleaner):
     assert len(results) == 2
  
 def test_dedup_keeps_all_unique(cleaner):
-    texts   = [f"This is unique document number {i}. " * 20 for i in range(10)]
+    texts = [
+        "The solar panels on the rooftop generated significant power. " * 20,
+        "Archaeologists uncovered ancient pottery near the riverbank. " * 20,
+        "The new transit line reduced commute times across the city. " * 20,
+        "Researchers identified a protein linked to memory formation. " * 20,
+        "Volunteers planted hundreds of trees along the highway. " * 20,
+        "The orchestra performed a rarely heard symphony last night. " * 20,
+        "Engineers designed a bridge using recycled steel materials. " * 20,
+        "Farmers adopted drone technology for precise crop monitoring. " * 20,
+        "The legislation passed after months of debate in parliament. " * 20,
+        "Students built a working robot for the national competition. " * 20,
+    ]
     results = cleaner.deduplicate(texts)
     assert len(results) == 10
- 
+
 def test_dedup_preserves_first_occurrence(cleaner):
     texts   = [f"Document {i} contains unique text. " * 30 for i in range(5)]
     results = cleaner.deduplicate(texts)
