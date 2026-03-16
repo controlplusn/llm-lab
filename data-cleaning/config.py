@@ -34,16 +34,16 @@ CONFIG = {
 
     # ── Repetition filter ─────────────────────────────────────
     # Line-level
-    "max_line_duplicate_ratio": 0.3,
-    "max_line_chars_duplicate_ratio": 0.2,
+    "max_line_duplicate_ratio": 0.5,
+    "max_line_chars_duplicate_ratio": 0.3,
 
     # Paragraph-level
     "max_para_duplicate_ratio": 0.3,
 
     # N-gram level
     "max_top_ngram_ratio_2": 0.2,
-    "max_top_ngram_ratio_3": 0.18,
-    "max_top_ngram_ratio_4": 0.16,
+    "max_top_ngram_ratio_3": 0.30,
+    "max_top_ngram_ratio_4": 0.25,
 
     # Word-level
     "max_word_duplicate_ratio": 0.3,

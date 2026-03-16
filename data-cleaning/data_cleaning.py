@@ -101,7 +101,7 @@ class DataCleaning:
         # Catches boilerplate lines repeated across page
         if non_empty_lines:
             line_counts      = Counter(non_empty_lines)
-            duplicated_lines = sum(c for c in line_counts.values() if c > 1)
+            duplicated_lines = sum(c - 1 for c in line_counts.values() if c > 2)
             line_dup_ratio   = duplicated_lines / len(non_empty_lines)
 
             if line_dup_ratio > self.config["max_line_duplicate_ratio"]:
@@ -127,7 +127,7 @@ class DataCleaning:
         # Catches copy-pasted templated sections
         if paragraphs:
             para_counts     = Counter(paragraphs)
-            duplicated_para = sum(c for c in para_counts.values() if c > 1)
+            duplicated_para = sum(c - 1 for c in para_counts.values() if c > 1)
             para_dup_ratio  = duplicated_para / len(paragraphs)
 
             if para_dup_ratio > self.config["max_para_duplicate_ratio"]:
@@ -136,12 +136,14 @@ class DataCleaning:
 
         # ── 4. N-gram repetition ratio ────────────────────
         # Catches SEO keyword stuffing and phrase repetition
+        MIN_WORDS_FOR_NGRAM = 30
+
         for n, config_key in [
             (2, "max_top_ngram_ratio_2"),
             (3, "max_top_ngram_ratio_3"),
             (4, "max_top_ngram_ratio_4"),
         ]:
-            if len(words) < n:
+            if len(words) < MIN_WORDS_FOR_NGRAM:
                 continue
 
             ngrams       = [tuple(words[i:i+n]) for i in range(len(words) - n + 1)]

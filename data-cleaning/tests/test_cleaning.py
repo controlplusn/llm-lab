@@ -88,12 +88,27 @@ def test_length_bullet_spam(cleaner):
 # Line-level
 def test_repetition_clean_text(cleaner):
     text = "\n".join([
-        "The quick brown fox jumps over the lazy dog.",
-        "A completely different sentence about something else.",
-        "Yet another unique line that adds new information.",
-        "This document has varied and diverse content throughout.",
-        "Each line here contributes something genuinely new.",
-    ] * 4)
+        "The researchers published new findings on solar energy efficiency.",
+        "A local council approved plans for a new community center.",
+        "Scientists observed unusual patterns in migratory bird behavior.",
+        "The company announced a major expansion into Southeast Asian markets.",
+        "Historians uncovered previously unknown letters from the 18th century.",
+        "Engineers developed a more efficient method for water desalination.",
+        "The film festival awarded its top prize to an independent production.",
+        "Meteorologists warned of increased storm activity along the coastline.",
+        "Archaeologists found artifacts suggesting earlier human settlement.",
+        "The university launched a new program focused on quantum computing.",
+        "Local farmers reported record harvests following improved irrigation.",
+        "A breakthrough in battery technology promises longer electric range.",
+        "The treaty was signed after months of diplomatic negotiations abroad.",
+        "New census data revealed significant shifts in urban population trends.",
+        "Volunteers restored a historic building in the center of the city.",
+        "The central bank raised interest rates to curb rising inflation.",
+        "Doctors developed a faster diagnostic test for a common respiratory illness.",
+        "Authorities issued an evacuation warning ahead of the approaching wildfire.",
+        "The startup secured major funding to expand its logistics platform.",
+        "Students demonstrated innovative projects at the regional science fair.",
+    ])
     assert cleaner.repetition_filter(text) is True
  
 def test_repetition_duplicate_lines(cleaner):
@@ -113,10 +128,19 @@ def test_repetition_duplicate_paragraphs(cleaner):
     assert cleaner.repetition_filter(text) is False
  
 def test_repetition_unique_paragraphs(cleaner):
-    text = "\n\n".join([
-        f"This is paragraph {i} with unique content about topic {i}."
-        for i in range(10)
-    ])
+    texts = [
+        "The researchers published new findings on solar energy efficiency.",
+        "A local council approved plans for a new community center.",
+        "Scientists observed unusual patterns in migratory bird behavior.",
+        "The company announced a major expansion into Southeast Asian markets.",
+        "Historians uncovered previously unknown letters from the 18th century.",
+        "Engineers developed a more efficient method for water desalination.",
+        "The film festival awarded its top prize to an independent production.",
+        "Meteorologists warned of increased storm activity along the coastline.",
+        "Archaeologists found artifacts suggesting earlier human settlement.",
+        "The university launched a new program focused on quantum computing.",
+    ]
+    text = "\n\n".join(texts)
     assert cleaner.repetition_filter(text) is True
  
 # N-gram level
