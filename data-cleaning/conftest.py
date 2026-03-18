@@ -7,7 +7,6 @@ from config import CONFIG
 from data_cleaning import DataCleaning
 
 
-
 @pytest.fixture(scope="session")
 def cleaner():
     return DataCleaning(CONFIG)

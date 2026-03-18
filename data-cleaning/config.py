@@ -4,7 +4,8 @@ CONFIG = {
     "subset_size": 1_000_000,
     "tokenizer_id": "meta-llama/Meta-Llama-3-8B",
     "ttr_batch_size": 1_000,
-
+    "output_path": "output/fineweb_cleaned.jsonl",
+    "raw_cache_path": "cache/fineweb_raw.jsonl",
 
 
     # ── Test config ──────────────────────────────
