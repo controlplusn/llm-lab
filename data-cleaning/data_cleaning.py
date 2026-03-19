@@ -10,6 +10,7 @@ class DataCleaning:
     def __init__(self, config: dict):
         self.config = config
 
+
     # ----- 1. Normalization -----
     def unicode_fix(self, text: str) -> str:
         if ftfy.is_bad(text):
@@ -19,6 +20,32 @@ class DataCleaning:
     
     def whitespace_normalization(self, text: str) -> str:
         return " ".join(text.split())
+
+
+    _NOISE_PATTERNS = [
+        # Null bytes and ASCII control characters (except \n \t)
+        (re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]'), ''),
+
+        # Zero-width and invisible unicode characters
+        (re.compile(r'[\u200b\u200c\u200d\u200e\u200f\ufeff\u00ad]'), ''),
+
+        # HTML entities that slipped through trafilatura
+        (re.compile(r'&amp;'),   '&'),
+        (re.compile(r'&nbsp;'),  ' '),
+        (re.compile(r'&lt;'),    '<'),
+        (re.compile(r'&gt;'),    '>'),
+        (re.compile(r'&#\d+;'),  ''),   # numeric HTML entities  &#39; &#160;
+
+        # Blocks of repeated non-alphanumeric symbols (visual spam)
+        # e.g. "████████" "————————" "========" "........"
+        (re.compile(r'([^\w\s])\1{4,}'), r'\1'),  # 5+ same symbol → keep 1
+    ]
+
+    def noise_removal(self, text: str) -> str:
+        for pattern, replacement in self._NOISE_PATTERNS:
+            text = pattern.sub(replacement, text)
+
+        return text
 
     
 
@@ -33,10 +60,10 @@ class DataCleaning:
             3. Line-level bounds + avg words per line
         """
 
-        words      = text.split()
+        words = text.split()
         word_count = len(words)
         char_count = len(text)
-        lines      = [l for l in text.splitlines() if l.strip()]
+        lines = [l for l in text.splitlines() if l.strip()]
         line_count = len(lines)
 
         
@@ -315,14 +342,16 @@ class DataCleaning:
     def clean(self, text: str) -> str | None:
         """
             1. Unicode fix              (normalization)
-            2. Whitespace norm          (normalization)
-            3. Length filter            (heuristic — rejects doc)
-            4. Repetition filter        (heuristic — rejects doc)
-            5. PII scrubbing            (replacement)
-            6. Final normalization      (cleanup)
+            2. Noise removal
+            3. Whitespace norm          (normalization)
+            4. Length filter            (heuristic — rejects doc)
+            5. Repetition filter        (heuristic — rejects doc)
+            6. PII scrubbing            (replacement)
+            7. Final normalization      (cleanup)
         """
 
         text = self.unicode_fix(text)
+        text = self.noise_removal(text)
         text = self.whitespace_normalization(text)
 
 
@@ -342,14 +371,15 @@ class DataCleaning:
         print("\n[DataCleaning] Running pipeline...")
 
         stats = {
-            "total":            0,
-            "after_unicode":    0,
+            "total": 0,
+            "after_unicode": 0,
+            "after_noise": 0,
             "after_whitespace": 0,
-            "after_length":     0,
+            "after_length": 0,
             "after_repetition": 0,
-            "after_pii":        0,
+            "after_pii": 0,
             "after_final_norm": 0,
-            "after_dedup":      0,
+            "after_dedup": 0,
         }
 
         passed = []
@@ -361,6 +391,10 @@ class DataCleaning:
             # Stage 1 — Unicode fix
             text = self.unicode_fix(text)
             stats["after_unicode"] += 1
+
+            # Stage 2 - Noise Removal
+            text = self.noise_removal(text)
+            stats["after_noise"] += 1
 
             # Stage 2 — Whitespace normalization
             text = self.whitespace_normalization(text)
@@ -399,14 +433,15 @@ class DataCleaning:
         total = stats["total"]
 
         rows = [
-            ("Total input",             stats["total"]),
-            ("After unicode fix",        stats["after_unicode"]),
-            ("After whitespace norm",    stats["after_whitespace"]),
-            ("After length filter",      stats["after_length"]),
-            ("After repetition filter",  stats["after_repetition"]),
-            ("After PII scrubbing",      stats["after_pii"]),
-            ("After final normalization",stats["after_final_norm"]),
-            ("After deduplication",      stats["after_dedup"]),
+            ("Total input", stats["total"]),
+            ("After unicode fix", stats["after_unicode"]),
+            ("After noise removal", stats["after_noise"]),
+            ("After whitespace norm", stats["after_whitespace"]),
+            ("After length filter", stats["after_length"]),
+            ("After repetition filter", stats["after_repetition"]),
+            ("After PII scrubbing", stats["after_pii"]),
+            ("After final normalization", stats["after_final_norm"]),
+            ("After deduplication", stats["after_dedup"]),
         ]
 
         print(f"\n  {'Stage':<30} {'Docs':>10} {'Retention':>10}")

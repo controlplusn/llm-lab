@@ -192,6 +192,7 @@ def run_cleaning(texts: list[str], config: dict) -> tuple[list[str], dict]:
     results, stats = cleaner.apply(subset)
     return results, stats
 
+
 # ----- Save output -----
 def save_output(results: list[str], config: dict):
     print("[5/6] Saving output...")
@@ -209,12 +210,13 @@ def save_output(results: list[str], config: dict):
     print(f"Size    : {size_mb:.1f} MB")
 
 
+
 # ------ TTR Comparison -----
 def print_ttr_comparison(raw_scores: np.ndarray, cleaned_scores: np.ndarray):
     print("\n" + "=" * 60)
     print("  TTR COMPARISON — RAW vs CLEANED")
     print("=" * 60)
-    print(f"  {'Metric':<25} {'Raw':>12} {'Cleaned':>12} {'Δ':>10}")
+    print(f"  {'Metric':<25} {'Raw':>12} {'Cleaned':>12} {'Difference':>10}")
     print(f"  {'-' * 59}")
 
     metrics = [
