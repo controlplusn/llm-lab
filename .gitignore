@@ -1,3 +1,22 @@
+# Python bytecode and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+dist/
+build/
+*.egg-info/
+
+# Testing and Caching
+.pytest_cache/
+**/.pytest_cache/
+data-cleaning/cache/
+data-cleaning/output/
+
+
+# Other temporary or generated files
+*.log
+
+
 .env
 .env.*
 __pycache__/
