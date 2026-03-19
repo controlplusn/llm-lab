@@ -34,6 +34,39 @@ def test_whitespace_only_spaces(cleaner):
     assert cleaner.whitespace_normalization("     ") == ""
 
 
+# --- Noise Removal
+def test_noise_null_bytes(cleaner):
+    assert "\x00" not in cleaner.noise_removal("hello\x00world")
+
+def test_noise_zero_width(cleaner):
+    assert "\u200b" not in cleaner.noise_removal("hello\u200bworld")
+
+def test_noise_html_entities(cleaner):
+    result = cleaner.noise_removal("fish &amp; chips &nbsp; here")
+    assert "&amp;" not in result
+    assert "&" in result          # & itself is kept
+
+def test_noise_repeated_symbols(cleaner):
+    result = cleaner.noise_removal("wow████████great")
+    assert "████████" not in result
+
+def test_noise_keeps_punctuation(cleaner):
+    text   = "It's a great day, isn't it? Yes — 100%!"
+    result = cleaner.noise_removal(text)
+    assert result == text         # nothing should change
+
+def test_noise_keeps_numbers(cleaner):
+    text   = "The year is 2024 and there are 8 billion people."
+    result = cleaner.noise_removal(text)
+    assert result == text
+
+def test_noise_keeps_uppercase(cleaner):
+    text   = "NASA launched the James Webb Space Telescope."
+    result = cleaner.noise_removal(text)
+    assert result == text
+
+
+
 # --- Length filter
 # Word count
 def test_length_valid_median_range(cleaner):
