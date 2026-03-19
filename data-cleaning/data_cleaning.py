@@ -1,9 +1,29 @@
 import re
 import ftfy
 import unicodedata
+import multiprocessing as mp
 from tqdm import tqdm
 from collections import Counter
+from functools import partial
 from datasketch import MinHash, MinHashLSH
+
+
+# ──────────── Module-level minhash worker ──────────────────────────
+def _minhash_worker(args: tuple) -> MinHash:
+    """
+        text -> MinHash signature
+    """
+
+    text, num_perm, ngram_size = args
+    minhash = MinHash(num_perm=num_perm)
+    text_bytes = text.lower().encode("utf-8")
+    n_size = ngram_size
+    text_bytes_len = len(text_bytes)
+
+    for i in range(text_bytes_len - n_size + 1):
+        minhash.update(text_bytes[i:i+n_size])
+
+    return minhash
 
 
 class DataCleaning:
@@ -240,22 +260,6 @@ class DataCleaning:
 
     
     # ----- Subset Deduplication -----
-
-    def _make_minhash(self, text: str) ->  MinHash:
-        """
-            MinHash signature from character n-gram shingles
-        """
-
-        m    = MinHash(num_perm=self.config["minhash_num_perm"])
-        n    = self.config["minhash_ngram_size"]
-        text = text.lower()
-
-        for i in range(len(text) - n + 1):
-            shingle = text[i:i+n]
-            m.update(shingle.encode("utf-8"))
-
-        return m
-
 
     def deduplicate(self, texts: list[str]) -> list[str]:
         """
