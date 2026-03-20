@@ -4,26 +4,6 @@ import unicodedata
 import multiprocessing as mp
 from tqdm import tqdm
 from collections import Counter
-from functools import partial
-from datasketch import MinHash, MinHashLSH
-
-
-# ──────────── Module-level minhash worker ──────────────────────────
-def _minhash_worker(args: tuple) -> MinHash:
-    """
-        text -> MinHash signature
-    """
-
-    text, num_perm, ngram_size = args
-    minhash = MinHash(num_perm=num_perm)
-    text_bytes = text.lower().encode("utf-8")
-    n_size = ngram_size
-    text_bytes_len = len(text_bytes)
-
-    for i in range(text_bytes_len - n_size + 1):
-        minhash.update(text_bytes[i:i+n_size])
-
-    return minhash
 
 
 class DataCleaning:
@@ -59,6 +39,9 @@ class DataCleaning:
         # Blocks of repeated non-alphanumeric symbols (visual spam)
         # e.g. "████████" "————————" "========" "........"
         (re.compile(r'([^\w\s])\1{4,}'), r'\1'),  # 5+ same symbol → keep 1
+
+        (re.compile(r'\|{2,}'), ' '),          # collapse double pipes
+        (re.compile(r'^\||\|$', re.M), ' '),   # strip leading/trailing pipes per line
     ]
 
     def noise_removal(self, text: str) -> str:
@@ -66,7 +49,50 @@ class DataCleaning:
             text = pattern.sub(replacement, text)
 
         return text
+        
+    
+    def pipe_table_filter(self, text: str) -> bool:
+        lines = [l for l in text.splitlines() if l.strip()]
+        if not lines:
+            return True
 
+        pipe_lines = sum(1 for l in lines if l.count('|') >= 2)
+        pipe_ratio = pipe_lines / len(lines)
+
+        if pipe_ratio > self.config.get("max_pipe_line_ratio", 0.15):
+            return False
+        return True
+
+    _LOGINWALL_PATTERN = re.compile(
+        r'(?i)(you must (be|have)|must be (a |logged|registered|signed)|'
+        r'sign in (to|now)|log in (to|now)|create an account|'
+        r'register (to|for|now)|already a member|members? only)',
+    )
+
+    def loginwall_filter(self, text: str) -> bool:
+        if self._LOGINWALL_PATTERN.search(text[:300]):
+            if len(text.split()) < 150:
+                return False
+        return True
+    
+
+    _DATESTAMP_LEAD = re.compile(
+        r'^(january|february|march|april|may|june|july|august|'
+        r'september|october|november|december|\d{1,2}[\/\-\.]\d{1,2})',
+        re.IGNORECASE
+    )
+    _NAV_LEAD = re.compile(
+        r'^(category\s*(archives?)?:|news of the week|tags?:|posted (in|by|on))',
+        re.IGNORECASE
+    )
+
+    def content_lead_filter(self, text: str) -> bool:
+        lead = text[:80].strip()
+        if self._DATESTAMP_LEAD.match(lead) and len(text.split()) < 120:
+            return False
+        if self._NAV_LEAD.match(lead):
+            return False
+        return True
     
 
     # ----- 2. Heuristic Filters -----
@@ -213,7 +239,6 @@ class DataCleaning:
                 return False
 
         return True
-    
 
 
     # ----- 3. PII Scrubbing -----
@@ -258,63 +283,6 @@ class DataCleaning:
         return text
 
 
-    
-    # ----- Subset Deduplication -----
-
-    def deduplicate(self, texts: list[str]) -> list[str]:
-        """
-            1. Build a MinHash signature for each document
-            2. Insert into LSH index — similar docs hash to
-               the same bucket (no all-pairs comparison needed)
-            3. Query each doc before inserting — if a similar
-               doc already exists, skip it as a duplicate
-
-        Threshold:
-            0.85 = documents sharing 85%+ of their n-gram
-            shingles are considered near-duplicates
-        """
-
-        print("\n  [Deduplication] Building MinHash LSH index...")
-
-        if not texts:
-            return []
-
-        lsh = MinHashLSH(
-            threshold=self.config["minhash_threshold"],
-            num_perm=self.config["minhash_num_perm"]
-        )
-
-        unique  = []
-        skipped = 0
-
-        for i, text in enumerate(tqdm(
-            texts,
-            desc="  MinHash LSH",
-            unit="docs",
-            ncols=80
-        )):
-            m = self._make_minhash(text)
-
-            # Query before inserting — is a near-duplicate already indexed?
-            results = lsh.query(m)
-            if results:
-                skipped += 1
-                continue
-
-            # No duplicate found — insert and keep
-            lsh.insert(f"doc_{i}", m)
-            unique.append(text)
-
-
-        total = len(texts)
-        print(f"\n  {'Input docs':<30} {total:,}")
-        print(f"  {'Duplicates removed':<30} {skipped:,} ({skipped/total*100:.1f}%)")
-        print(f"  {'Unique docs kept':<30} {len(unique):,} ({len(unique)/total*100:.1f}%)")
-        print("  ✓ Deduplication complete\n")
-
-        return unique
-    
-
 
     # ----- Final Normalization -----
     def final_normalization(self, text: str) -> str:
@@ -354,21 +322,16 @@ class DataCleaning:
             7. Final normalization      (cleanup)
         """
 
-        text = self.unicode_fix(text)
-        text = self.noise_removal(text)
-        text = self.whitespace_normalization(text)
-
-
-        if not self.length_filter(text):
-            return None
-        if not self.repetition_filter(text):
-            return None
-
-        text = self.pii_scrubbing(text)
-
-        text = self.final_normalization(text)
-
-        return text
+        stats = {
+            "after_length": 0, 
+            "after_repetition": 0,
+            "after_pipe_table": 0,
+            "after_loginwall": 0,
+            "after_content_lead": 0,
+            "after_pii": 0, 
+            "after_final_norm": 0,
+        }
+        return self._clean_one(text, stats)
     
 
     def apply(self, subset) -> tuple[list[str], dict]:
@@ -376,83 +339,128 @@ class DataCleaning:
 
         stats = {
             "total": 0,
-            "after_unicode": 0,
-            "after_noise": 0,
-            "after_whitespace": 0,
             "after_length": 0,
             "after_repetition": 0,
+            "after_pipe_table": 0,
+            "after_loginwall": 0,
+            "after_content_lead": 0,
             "after_pii": 0,
             "after_final_norm": 0,
-            "after_dedup": 0,
         }
 
         passed = []
 
-        for row in tqdm(subset, desc="  Cleaning", unit="docs", ncols=80):
-            text = row["text"] if isinstance(row, dict) else row
+        for row in tqdm(
+            subset, 
+            desc="Cleaning", 
+            unit="docs", 
+            ncols=80
+        ):
             stats["total"] += 1
-
-            # Stage 1 — Unicode fix
-            text = self.unicode_fix(text)
-            stats["after_unicode"] += 1
-
-            # Stage 2 - Noise Removal
-            text = self.noise_removal(text)
-            stats["after_noise"] += 1
-
-            # Stage 2 — Whitespace normalization
-            text = self.whitespace_normalization(text)
-            stats["after_whitespace"] += 1
-
-            # Stage 3 — Length filter
-            if not self.length_filter(text):
-                continue
-            stats["after_length"] += 1
-
-            # Stage 4 — Repetition filter
-            if not self.repetition_filter(text):
-                continue
-            stats["after_repetition"] += 1
-
-            # Stage 5 — PII scrubbing
-            text = self.pii_scrubbing(text)
-            stats["after_pii"] += 1
-
-            # Stage 6 — Final normalization
-            text = self.final_normalization(text)
-            stats["after_final_norm"] += 1
-
-            passed.append(text)
-
-
-        results = self.deduplicate(passed)
-        stats["after_dedup"] = len(results)
+            text = self._extract_text(row)
+            cleaned = self._clean_one(text, stats)
+            if cleaned is not None:
+                passed.append(cleaned)
 
         self._print_stats(stats)
+        return passed, stats
+
+
+    @staticmethod
+    def _extract_text(row) -> str:
+        return row["text"] if isinstance(row, dict) else row
+
+
+    # Deduplication stream: clean one document
+    def _clean_one(self, text: str, stats: dict) -> str | None:
+        text = self.unicode_fix(text)
+        text = self.noise_removal(text)
+        text = self.whitespace_normalization(text)
+
+        if not self.length_filter(text):
+            return None
+        stats["after_length"] += 1
+
+        if not self.repetition_filter(text):
+            return None
+        stats["after_repetition"] += 1
+
+        if not self.pipe_table_filter(text):
+            return None
+        stats["after_pipe_table"] += 1
+
+        if not self.loginwall_filter(text):
+            return None
+        stats["after_loginwall"] += 1
+
+        if not self.content_lead_filter(text):
+            return None
+        stats["after_content_lead"] += 1
+
+        text = self.pii_scrubbing(text)
+        stats["after_pii"] += 1
+
+        text = self.final_normalization(text)
+        stats["after_final_norm"] += 1
+
+        return text
+    
+
+    # Deduplication stream: generate cleaned texts
+    def _cleaned_stream(self, source_iterator, stats: dict):
+        for row in tqdm(source_iterator, desc="Cleaning", unit="docs", ncols=80):
+            stats["total"] += 1
+            text = self._extract_text(row)
+            cleaned = self._clean_one(text, stats)
+            if cleaned is not None:
+                yield cleaned
+
+    
+    def apply_streaming(
+        self,
+        source_iterator
+    ) -> tuple[list[str], dict]:
+        stats = {
+            "total": 0,
+            "after_length": 0,
+            "after_repetition": 0,
+            "after_pipe_table": 0,
+            "after_loginwall": 0,
+            "after_content_lead": 0, 
+            "after_pii": 0,
+            "after_final_norm": 0,
+        }
+
+        cleaned  = self._cleaned_stream(source_iterator, stats)
+
+        results = list(cleaned)
+        self._print_stats(stats)
+
         return results, stats
+
     
 
     def _print_stats(self, stats: dict):
-        """Print per-stage breakdown table after apply()."""
         total = stats["total"]
 
         rows = [
             ("Total input", stats["total"]),
-            ("After unicode fix", stats["after_unicode"]),
-            ("After noise removal", stats["after_noise"]),
-            ("After whitespace norm", stats["after_whitespace"]),
             ("After length filter", stats["after_length"]),
             ("After repetition filter", stats["after_repetition"]),
+            ("After pipe-table filter", stats["after_pipe_table"]),
+            ("After login-wall filter", stats["after_loginwall"]),
+            ("After content-lead filter",stats["after_content_lead"]),
             ("After PII scrubbing", stats["after_pii"]),
             ("After final normalization", stats["after_final_norm"]),
-            ("After deduplication", stats["after_dedup"]),
         ]
 
         print(f"\n  {'Stage':<30} {'Docs':>10} {'Retention':>10}")
         print(f"  {'-' * 52}")
+
         for label, count in rows:
             retention = f"{count / total * 100:.1f}%" if total > 0 else "n/a"
             print(f"  {label:<30} {count:>10,} {retention:>10}")
+
         print(f"  {'-' * 52}")
-        print(f"  {'Final output':<30} {stats['after_dedup']:>10,} "
-              f"{stats['after_dedup'] / total * 100:>9.1f}%\n")
+        print(f"  {'Final output':<30} {stats['after_final_norm']:>10,} "
+                f"{stats['after_final_norm'] / total * 100:>9.1f}%\n")

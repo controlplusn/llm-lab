@@ -27,19 +27,19 @@ def load_fw(config: dict):
     os.makedirs("cache", exist_ok=True)
     
     if os.path.exists(raw_cache):
-        print(f"Found local cache → {raw_cache}")
-        print("Loading from disk...")
+        print(f"    Found local cache → {raw_cache}")
+        print(" Loading from disk...")
 
         texts = []
         with open(raw_cache, encoding="utf-8") as f:
             for line in tqdm(f, desc="Reading cache", ncols=80):
                 texts.append(json.loads(line)["text"])
 
-        print(f"Loaded {len(texts):,} rows from cache\n")
+        print(f"    Loaded {len(texts):,} rows from cache\n")
         return texts
 
-    print(f"No cache found — downloading {config['subset_size']:,} rows...")
-    print(f"Saving to {raw_cache}...")
+    target = config["subset_size"]
+    print(f"  No cache — downloading {target:,} rows...")
 
     fw = load_dataset(
         config["dataset_name"],
@@ -48,110 +48,79 @@ def load_fw(config: dict):
         streaming=True
     )
 
-    already_saved = 0
-    if os.path.exists(raw_cache):
-        with open(raw_cache, encoding="utf-8") as f:
-            already_saved = sum(1 for _ in f)
+    texts  = []
+    stream = fw.select_columns(["text"]).take(target)
 
-    if already_saved > 0:
-        print(f"Resuming from row {already_saved:,}...")
-
-    texts = []
-    target = config["subset_size"]
-    stream = fw.select_columns(["text"]).skip(already_saved).take(
-        target - already_saved
-    )
-
-    # Load existing rows into memory first
-    if already_saved > 0:
-        with open(raw_cache, encoding="utf-8") as f:
-            for line in f:
-                texts.append(json.loads(line)["text"])
-
-    with open(raw_cache, "a", encoding="utf-8") as f:
-        for row in tqdm(
-            stream,
-            total = target - already_saved,
-            desc = "Downloading",
-            unit = "docs",
-            ncols = 80
-        ):
+    with open(raw_cache, "w", encoding="utf-8") as f:
+        for row in tqdm(stream, total=target, desc="  Downloading", ncols=80):
             text = row["text"]
             if isinstance(text, str) and text.strip():
                 texts.append(text)
                 f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
 
-    print(f"{len(texts):,} rows cached to {raw_cache}\n")
+    print(f"  {len(texts):,} rows cached → {raw_cache}\n")
     return texts
 
 
 # ----- TTR Computation -----
-def compute_ttr(source, config: dict, tokenizer, label: str = "raw") -> np.ndarray:
-    print("[2/6] Computing TTR scores...")
-
+def compute_ttr(
+    source: list[str],
+    config: dict,
+    tokenizer,
+    label: str = "raw"
+) -> np.ndarray:
     ttr_scores = []
     batch      = []
     batch_size = config["ttr_batch_size"]
     skipped    = 0
 
-    if isinstance(source, list):
-        iterable = iter(source)
-        total = len(source)
-        def get_text(item):
-            return item
-
-    else:
-        iterable = fw.select_columns(["text"]).take(config["subset_size"])
-        total = config["subset_size"]
-        def get_text(item):
-            return item["text"]
-
-    progress = tqdm(
-        total=total,
-        desc=f"TTR ({label})",
-        unit="docs",
-        ncols=80
-    )
-
-    for item in iterable:
-        text = get_text(item)
-
-        if not isinstance(text, str) or not text.strip():
-            skipped += 1
-            progress.update(1)
-            continue
-
-        batch.append(text)
-
-        if len(batch) == batch_size:
-            tokenized = tokenizer(
-                batch,
-                add_special_tokens=False,
-                truncation=True,
-                max_length=8192,
-            )
-            for ids in tokenized["input_ids"]:
-                if len(ids) > 0:
-                    ttr_scores.append(len(set(ids)) / len(ids))
-            progress.update(batch_size)
-            batch = []
-
-    # Flush remaining rows
-    if batch:
+    def _score_batch(batch: list[str]) -> list[float]:
         tokenized = tokenizer(
             batch,
             add_special_tokens=False,
             truncation=True,
             max_length=8192,
         )
-        for ids in tokenized["input_ids"]:
-            if len(ids) > 0:
-                ttr_scores.append(len(set(ids)) / len(ids))
-        progress.update(len(batch))
+        return [
+            len(set(ids)) / len(ids)
+            for ids in tokenized["input_ids"]
+            if len(ids) > 0
+        ]
 
-    progress.close()
+    with tqdm(
+        total=len(source), 
+        desc=f"TTR ({label})", 
+        unit="docs", ncols=80
+    ) as progress:
+        for text in source:
+
+            # Guard: skip non-string or empty docs
+            if not isinstance(text, str) or not text.strip():
+                skipped += 1
+                progress.update(1)
+                continue
+
+            batch.append(text)
+            progress.update(1)   # ← update per item, not per batch
+
+            if len(batch) == batch_size:
+                ttr_scores.extend(_score_batch(batch))
+                batch = []
+
+        # Flush remaining docs that didn't fill a full batch
+        if batch:
+            ttr_scores.extend(_score_batch(batch))
 
     scores = np.array(ttr_scores)
+
+    if len(scores) == 0:
+        print(f"\n  {'Label':<30} {label}")
+        print(f"  {'Documents processed':<30} 0")
+        print(f"  {'Skipped (None/empty)':<30} {skipped:,}")
+        print("  No valid documents to score.")
+
+        return scores
+
     print(f"\n  {'Label':<30} {label}")
     print(f"  {'Documents processed':<30} {len(scores):,}")
     print(f"  {'Skipped (None/empty)':<30} {skipped:,}")
@@ -163,7 +132,7 @@ def compute_ttr(source, config: dict, tokenizer, label: str = "raw") -> np.ndarr
 
 
 # ----- Length threshold -----
-def compute_length_stats(texts: list[str], config: dict) -> np.ndarray:
+def compute_length_stats(texts: list[str]) -> np.ndarray:
     print("[3/6] Computing length distribution...")
 
     lengths = [
@@ -187,10 +156,9 @@ def run_cleaning(texts: list[str], config: dict) -> tuple[list[str], dict]:
     print("[4/6] Running data cleaning pipeline...")
 
     cleaner = DataCleaning(config)
-    subset  = [{"text": t} for t in texts]
-
-    results, stats = cleaner.apply(subset)
+    results, stats = cleaner.apply(texts)
     return results, stats
+
 
 
 # ----- Save output -----
@@ -232,7 +200,7 @@ def print_ttr_comparison(raw_scores: np.ndarray, cleaned_scores: np.ndarray):
     for label, raw_val, clean_val, is_float in metrics:
         if is_float:
             delta = clean_val - raw_val
-            sign  = "+" if delta >= 0 else ""
+            sign = "+" if delta >= 0 else ""
             print(f"  {label:<25} {raw_val:>12.4f} {clean_val:>12.4f} "
                   f"{sign}{delta:>9.4f}")
         else:
@@ -257,17 +225,19 @@ if __name__ == "__main__":
         token=os.getenv("HF_TOKEN")
     )
 
+    print("[2/6] Computing TTR (raw)...")
     raw_ttr = compute_ttr(fw, CONFIG, tokenizer, label="raw")
  
     # 3 — Length stats  (comment out after thresholds are set)
-    length_arr = compute_length_stats(fw, CONFIG)
+    length_arr = compute_length_stats(fw)
  
     # 4 — Clean
     cleaned, stats = run_cleaning(fw, CONFIG)
- 
+
     # 5 — Save
     save_output(cleaned, CONFIG)
 
     # 6 - TTR Calculation for cleaned data
+    print("[6/6] Computing TTR (cleaned)...")
     cleaned_ttr = compute_ttr(cleaned, CONFIG, tokenizer, label="cleaned")
     print_ttr_comparison(raw_ttr, cleaned_ttr)
