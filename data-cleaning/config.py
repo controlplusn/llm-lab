@@ -11,6 +11,11 @@ CONFIG = {
     # Paths
     "output_path": "output/fineweb_cleaned_20B.jsonl",
 
+    # Checkpoint paths
+    "checkpoint_path": "cache/upload_checkpoint.json",
+    "token_log_path": "cache/chunk_token_log.csv",
+    "tmp_parquet_dir": "cache",
+
     # HuggingFace
     "hf_repo_id": "fineweb-cleaned-20B",
     "hf_private": False,
