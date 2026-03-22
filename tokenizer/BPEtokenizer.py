@@ -76,7 +76,7 @@ def stream_dataset_to_file(hf_dataset: str, sample_size: int = 200_000) -> str:
 
 def main():
     tokenizer = BPEtokenizer()
-    HF_DATASET = os.getenv("HF_DATASET")
+    HF_DATASET = "anaoly/fineweb-cleaned-20B"
 
     if not os.path.exists("tokenizer/vocab.json"):
         print("Training tokenizer...")
