@@ -12,6 +12,7 @@ def load_config(vocab_path=vocab_path):
 
     return {
         "input_ids": list(vocab.values()),
+        "tokens": list(vocab.keys()),
         "vocab_size": len(vocab),
         "d_model": 512,
         "num_heads": 8,

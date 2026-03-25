@@ -29,6 +29,7 @@ class EmbeddingLayer:
 
 if __name__ == "__main__":
     vocab = CONFIG["input_ids"]
+    tokens = CONFIG["tokens"]
     vocab_size = CONFIG["vocab_size"]
     d_model = CONFIG["d_model"]
 
@@ -44,8 +45,15 @@ if __name__ == "__main__":
     print(f"Weight stats — mean: {embedding_layer.weights.mean():.4f}, std: {embedding_layer.weights.std():.4f}")
 
     num_tokens_to_show = 5
-    sample_ids = np.arange(num_tokens_to_show)
+    sample_tokens = tokens[:num_tokens_to_show]
+    sample_ids = vocab[:num_tokens_to_show]
+
+    print("\nSamples:")
+    print(f"Sample Tokens: {sample_tokens}")
+    print(f"Sample IDs: {sample_ids}")
+
+
     sample_vectors = embedding_layer.forward(sample_ids)
     print(f"\nFirst {num_tokens_to_show} token embeddings ({sample_vectors.shape}):")
-    for tid, vec in zip(sample_ids, sample_vectors):
-        print(f"  token {tid:>4d} → [{', '.join(f'{v:.4f}' for v in vec[:6])}...]")
+    for tid, vec in zip(sample_tokens, sample_vectors):
+        print(f"  token {tid:>4} → [{', '.join(f'{v:.4f}' for v in vec[:6])}...]")
