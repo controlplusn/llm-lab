@@ -5,14 +5,14 @@ from config import load_config
 CONFIG = load_config()
 
 class SingleHeadAttention:
-    def __init__(self, vocab_size, d_model, num_heads):
+    def __init__(self, vocab_size, d_model):
         self.vocab_size = vocab_size
         self.d_model = d_model
+
         self.weights = np.random.randn(vocab_size, d_model) * np.sqrt(1.0 / d_model)
 
         # Dimensional model for Query, Key, and Value
-        self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
+        self.head_dim = d_model
 
         # Weights for Q, K, and V
         self.W_q = np.random.randn(d_model, d_model) * np.sqrt(1.0 / d_model)
@@ -46,16 +46,29 @@ class SingleHeadAttention:
 
         return pe
 
-
     
+    def softmax(self, scores):
+        scores_shifted = scores - np.max(scores, axis=1, keepdims=True)
+        exp_scores = np.exp(scores_shifted)
+        weights = exp_scores / np.sum(exp_scores, axis=1, keepdims=True)
+
+        return weights
+
+
     def self_attention(self, embedding):
         
         query = embedding @ self.W_q
         key = embedding @ self.W_k
+        value = embedding @ self.W_v
+        
+        scale = np.sqrt(self.head_dim)
+        scores = (query @ key.T) / scale
+        
+        weights = self.softmax(scores)
 
-        scores = query @ key.T
-        return scores
-    
+        output = weights @ value
+
+        return scores, weights, output
     
 
     def forward(self, token_ids):
@@ -66,8 +79,8 @@ class SingleHeadAttention:
         # Combined embedding matrix
         x = token_embeddings + pe
         
-        attention_output = self.self_attention(x)
-        return x, attention_output
+        scores, weights, output = self.self_attention(x)
+        return x, scores, weights, output
 
     
 
@@ -76,36 +89,38 @@ if __name__ == "__main__":
     tokens = CONFIG["tokens"]
     vocab_size = CONFIG["vocab_size"]
     d_model = CONFIG["d_model"]
-    num_heads = 8
 
-    model = SingleHeadAttention(vocab_size, d_model, num_heads)
-
+    model = SingleHeadAttention(vocab_size, d_model)
     sample_ids = np.array(vocab[:5], dtype=int)
     sample_tokens = tokens[:5]
 
-    combined_vectors, attention_scores = model.forward(sample_ids)
+    combined_vectors, raw_scores, attention_weights, attention_output = model.forward(sample_ids)
 
     print(f"Input shape (IDs): {sample_ids.shape}")
     print(f"Combined Embeddings shape: {combined_vectors.shape}")
-    print(f"Attention Scores shape: {attention_scores.shape}")
+    print(f"Raw scores shape: {raw_scores.shape}")
+    print(f"Attention weights shape: {attention_weights.shape}")
+    print(f"Attention output shape: {attention_output.shape}")
 
-    print(f"\nFirst 5 token embeddings (Showing first 6 dims of {d_model}):")
-    for tid, vec in zip(sample_tokens, combined_vectors):
-        # This no longer crashes because combined_vectors has d_model (128) columns
-        print(f"  token {tid:>6} → [{', '.join(f'{v:>7.4f}' for v in vec[:6])}...]")
+    # Softmax verification
+    print("\nWeight rows sum (Softmax verification):")
+    print(np.sum(attention_weights, axis=-1))
 
-    print("\nSelf-Attention Raw Scores (Correlation Matrix):")
+    print("\nRaw attention scores:")
     header = f"{'':>12} |" + "".join(f"{t:>12}" for t in sample_tokens)
     print(header)
     print("-" * len(header))
-
     for i, row_token in enumerate(sample_tokens):
         row_str = f"{row_token:>12} |"
-        for val in attention_scores[i]:
+        for val in raw_scores[i]:
             row_str += f"{val:12.4f}"
         print(row_str)
 
-    print("\nInterpretation:")
-    print("- Higher (more positive) values indicate stronger 'affinity' between tokens.")
-    print("- Diagonal values show how much a token focuses on itself.")
-    print("- Since there is no Softmax, these values can be any real number.")
+    print("\nAttention weights (after softmax):")
+    print(header)
+    print("-" * len(header))
+    for i, row_token in enumerate(sample_tokens):
+        row_str = f"{row_token:>12} |"
+        for val in attention_weights[i]:
+            row_str += f"{val:12.4f}"
+        print(row_str)
