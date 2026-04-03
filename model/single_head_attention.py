@@ -19,6 +19,15 @@ class SingleHeadAttention:
         self.W_k = np.random.randn(d_model, d_model) * np.sqrt(1.0 / d_model)
         self.W_v = np.random.randn(d_model, d_model) * np.sqrt(1.0 / d_model)
 
+    
+    # Print size of weights
+    def weight_size(self):
+        query_len = self.W_q.shape
+        key_len = self.W_k.shape
+
+        print(f"Query weights size: {query_len}")
+        print(f"Key weights size: {key_len}")
+
 
     def positional_encoding(self, pos_index, d_model_index):
         
@@ -56,7 +65,6 @@ class SingleHeadAttention:
 
 
     def self_attention(self, embedding):
-        
         query = embedding @ self.W_q
         key = embedding @ self.W_k
         value = embedding @ self.W_v
@@ -78,6 +86,8 @@ class SingleHeadAttention:
         
         # Combined embedding matrix
         x = token_embeddings + pe
+
+        print(f"Size of embedding: {x.shape}")
         
         scores, weights, output = self.self_attention(x)
         return x, scores, weights, output
@@ -90,9 +100,17 @@ if __name__ == "__main__":
     vocab_size = CONFIG["vocab_size"]
     d_model = CONFIG["d_model"]
 
+    attn = SingleHeadAttention(vocab_size, d_model)
+    print(attn.weight_size())
+
+    print(f"Length of token ids (seq_len): {len(vocab)}")
+    print(f"Size of dimension model: {d_model}")
+
     model = SingleHeadAttention(vocab_size, d_model)
     sample_ids = np.array(vocab[:5], dtype=int)
     sample_tokens = tokens[:5]
+
+    print(attn.forward(vocab))
 
     combined_vectors, raw_scores, attention_weights, attention_output = model.forward(sample_ids)
 
