@@ -68,16 +68,26 @@ class EmbeddingLayer(nn.Module):
         return exp_values / np.sum(exp_values)
 
 
-    def self_attention(self, embedding):
+    def self_attention(self, embedding, mask=None):
         x = torch.tensor(embedding, dtype=torch.float32)
         
-        Q = self.W_q(x)
+        Q = self.W_q(x) # 
         K = self.W_k(x)
         V = self.W_v(x)
 
+        # Scaling and computation of score (q * k)
         scale = math.sqrt(self.d_model)
         score = torch.matmul(Q, K.transpose(-2, -1)) / scale
-        weights = torch.softmax(score, dim=-1)
+
+        # Masking
+        seq_len = score.shape[-1]
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()
+
+        # Applied masking to score
+        masked_score = score.masked_fill(causal_mask, float('-inf'))
+
+        # Softmax
+        weights = torch.softmax(masked_score, dim=-1)
         context = torch.matmul(weights, V)
 
         return Q, K, V, weights, context
