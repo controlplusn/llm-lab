@@ -15,11 +15,62 @@ from config import load_config
 CONFIG = load_config()
 
 
-class LayerNorm(nn.Module):
-    def __init__(self, embedding):
-        super().__init__()
-        self.embedding = embedding
 
+# Token Embedding Layer
+class EmbeddingLayer(nn.Module):
+    # token IDs -> embedding vectors -> positional encoding
+    def __init__(self, vocab_size, d_model):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+
+        """
+            1. What I used - too small
+                - self.weights = np.random.randn(vocab_size, d_model) * 0.01 -> stats: mean: -0.0000, std: 0.0100
+            
+            2. Xavier / Glorot Initialization - general use, stable gradients:
+                - self.weights = np.random.randn(vocab_size, d_model) * np.sqrt(1.0 / d_model) -> stats: mean: -0.0000, std: 0.0442
+
+            3. Standard Normal - LLMs, emiprically proven:
+                - self.weights = np.random.normal(loc=0.0, scale=0.02, size=(vocab_size, d_model))
+        """
+        self.weights = np.random.randn(vocab_size, d_model) * np.sqrt(1.0 / d_model)    # Since I'm doing this just for a personal project, this is ok for now
+
+    
+    def positional_encoding(self, pos_index, d_model_index):
+        # pair index -> dim 2i and 2i+1
+        i = d_model_index // 2 
+        exponent = (2 * i) / self.d_model
+
+        if d_model_index % 2 == 0:
+            result = math.sin(pos_index / 10_000**exponent)
+        else:
+            result = math.cos(pos_index / 10_000**exponent)
+
+        return result
+    
+
+    def build_positional_encoding(self, seq_len):
+        pe = np.zeros((seq_len, self.d_model))
+
+        for pos in range(seq_len):
+            for dim in range(self.d_model):
+                pe[pos, dim] = self.positional_encoding(pos, dim)
+
+        return pe
+
+
+    def forward(self, token_ids):
+        token_embeddings = self.weights[token_ids]
+        seq_len = len(token_ids)
+        pe = self.build_positional_encoding(seq_len)
+        return token_embeddings + pe
+
+
+
+class LayerNorm(nn.Module):
+    def __init__(self, d_model):
+        super().__init__()
         self.gamma = nn.Parameter(torch.ones(d_model))
         self.beta = nn.Parameter(torch.zeros(d_model))
 
@@ -77,69 +128,44 @@ class MultiHeadAttention(nn.Module):
         return output
 
 
-
-# Token Embedding Layer
-class EmbeddingLayer(nn.Module):
-    # token IDs -> embedding vectors -> positional encoding
-    def __init__(self, vocab_size, d_model):
+class FeedForward(nn.Module):
+    def __init__(self, d_model, ffn_dim):
         super().__init__()
-        self.vocab_size = vocab_size
         self.d_model = d_model
+        self.ffn_dim = ffn_dim
 
-        """
-            1. What I used - too small
-                - self.weights = np.random.randn(vocab_size, d_model) * 0.01 -> stats: mean: -0.0000, std: 0.0100
-            
-            2. Xavier / Glorot Initialization - general use, stable gradients:
-                - self.weights = np.random.randn(vocab_size, d_model) * np.sqrt(1.0 / d_model) -> stats: mean: -0.0000, std: 0.0442
+        self.Linear0 = nn.Linear(d_model, ffn_dim)
+        self.Linear1 = nn.Linear(ffn_dim, d_model)
+        self.relu = nn.ReLU()
 
-            3. Standard Normal - LLMs, emiprically proven:
-                - self.weights = np.random.normal(loc=0.0, scale=0.02, size=(vocab_size, d_model))
-        """
-        self.weights = np.random.randn(vocab_size, d_model) * np.sqrt(1.0 / d_model)    # Since I'm doing this just for a personal project, this is ok for now
-
-    
-    def positional_encoding(self, pos_index, d_model_index):
-        # pair index -> dim 2i and 2i+1
-        i = d_model_index // 2 
-        exponent = (2 * i) / self.d_model
-
-        if d_model_index % 2 == 0:
-            result = math.sin(pos_index / 10_000**exponent)
-        else:
-            result = math.cos(pos_index / 10_000**exponent)
-
-        return result
+    def forward(self, x):
+        return self.Linear1(self.relu(self.Linear0(x)))
     
 
-    def build_positional_encoding(self, seq_len):
-        pe = np.zeros((seq_len, self.d_model))
 
-        for pos in range(seq_len):
-            for dim in range(self.d_model):
-                pe[pos, dim] = self.positional_encoding(pos, dim)
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, num_heads, ffn_dim):
+        super().__init__()
+        self.mha = MultiHeadAttention(d_model, num_heads)
+        self.ffn = FeedForward(d_model, ffn_dim)
+        self.norm1 = LayerNorm(d_model)
+        self.norm2 = LayerNorm(d_model)
 
-        return pe
 
+    def forward(self, x):
+        # attention + residual + norm
+        attention_output = self.mha(x)
+        x = self.norm1(attention_output + x)
 
-    def forward(self, token_ids):
-        token_embeddings = self.weights[token_ids]
-        seq_len = len(token_ids)
-        pe = self.build_positional_encoding(seq_len)
-        return token_embeddings + pe
+        # ffn + residual + norm
+        ff_output = self.ffn(x)
+        x = self.norm2(ff_output + x)
+
+        return x
+
 
 
 if __name__ == "__main__":
-    vocab = CONFIG["input_ids"] # (32, 000)
-    tokens = CONFIG["tokens"] # (32, 000)
-    vocab_size = CONFIG["vocab_size"] # (32, 000)
-    d_model = CONFIG["d_model"] # (512)
-
-    embedding_layer = EmbeddingLayer(vocab_size, d_model)
-    input_ids = np.array(vocab, dtype=int)
-    output_embedding = embedding_layer.forward(input_ids)
-
-    print(f"Embedding size: {vocab_size} * {d_model}")
-    print(f"Input shape: {input_ids.shape}")
-    print(f"Output embeddings shape: {output_embedding.shape}")
-    print(f"Weight stats — mean: {embedding_layer.weights.mean():.4f}, std: {embedding_layer.weights.std():.4f}")
+    input_ids = CONFIG["input_ids"]
+    
+    print(input_ids[0:5])
