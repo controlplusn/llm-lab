@@ -15,6 +15,21 @@ from config import load_config
 CONFIG = load_config()
 
 
+class LayerNorm(nn.Module):
+    def __init__(self, embedding):
+        super().__init__()
+        self.embedding = embedding
+
+        self.gamma = nn.Parameter(torch.ones(d_model))
+        self.beta = nn.Parameter(torch.zeros(d_model))
+
+    def forward(self, x):
+        mean = x.mean(dim=-1, keepdim=True)
+        std = x.std(dim=-1, keepdim=True)
+
+        return self.gamma * (x - mean) / (std + 1e-6) + self.beta
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads):
         super().__init__()
