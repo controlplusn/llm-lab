@@ -166,6 +166,81 @@ class TransformerBlock(nn.Module):
 
 
 if __name__ == "__main__":
-    input_ids = CONFIG["input_ids"]
+    input_ids = CONFIG["input_ids"]     # Sample input for embedding layer
+    d_model = CONFIG["d_model"]
+    vocab_size = CONFIG["vocab_size"]
+    num_heads = CONFIG["num_heads"]
+    ffn_dim = CONFIG["ffn_dim"]
+
+    batch = 2
+    seq_len = 10
+
+    dummy_input = torch.randn(batch, seq_len, d_model)
+
+    # Embedding layer test
+    embedding_layer = EmbeddingLayer(vocab_size, d_model)
+    output_embedding = embedding_layer.forward(input_ids)
+
+    print("="*20)
+    print("Sample Embedding matrix")
+    print("="*20) 
+    print(output_embedding)
+
+    # Expected output: [seq_len x d_model]
+    print(f"Embedding Shape: {output_embedding.shape}")
+
+
+    # Multi-Head Attention test
+    mha = MultiHeadAttention(d_model, num_heads)
+    output_mha = mha.forward(dummy_input)
     
-    print(input_ids[0:5])
+    print()
+    print("="*20)
+    print("Sample Multi-Head matrix")
+    print("="*20) 
+    print(output_mha)
+
+    # Expected output: [batch x seq_len x d_model]
+    print(f"Multi-Head Attention Shape: {output_mha.shape}")
+
+
+    # Feed Forward Network test
+    ffn = FeedForward(d_model, ffn_dim)
+    output_ffn = ffn.forward(dummy_input)
+
+    print()
+    print("="*20)
+    print("Sample FFN matrix")
+    print("="*20) 
+    print(output_ffn)
+
+    # Expected output: [batch x seq_len x d_model]
+    print(f"FFN Shape: {output_ffn.shape}") 
+
+
+    # Layer Norm test
+    norm = LayerNorm(d_model)
+    output_norm = norm.forward(dummy_input)
+
+    print()
+    print("="*20)
+    print("Sample Layer Norm matrix")
+    print("="*20) 
+    print(output_norm)
+
+    # Expected output: [batch x seq_len x d_model]
+    print(f"Layer Norm Shape: {output_norm.shape}")
+
+
+    # Transformer Block test
+    transformer = TransformerBlock(d_model, num_heads, ffn_dim)
+    output_transformer = transformer.forward(dummy_input)
+
+    print()
+    print("="*20)
+    print("Sample Transformer Block matrix")
+    print("="*20) 
+    print(output_transformer)
+
+    # Expected output: [batch x seq_len x d_model]
+    print(f"Multi-Head Attention Shape: {output_transformer.shape}")
