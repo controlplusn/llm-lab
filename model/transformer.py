@@ -52,18 +52,23 @@ class EmbeddingLayer(nn.Module):
     
 
     def build_positional_encoding(self, seq_len):
-        pe = np.zeros((seq_len, self.d_model))
-
-        for pos in range(seq_len):
-            for dim in range(self.d_model):
-                pe[pos, dim] = self.positional_encoding(pos, dim)
-
+        pos = np.arange(seq_len)[:, np.newaxis]         # [seq_len, 1]
+        dim = np.arange(self.d_model)[np.newaxis, :]    # [1, d_model]    
+        
+        i = dim // 2
+        exponent = (2 * i) / self.d_model
+        angles = pos / np.power(10_000, exponent)
+        pe = np.where(dim % 2 == 0, np.sin(angles), np.cos(angles))
+        
         return pe
 
 
     def forward(self, token_ids):
+        if not isinstance(token_ids, torch.Tensor):
+            token_ids = torch.tensor(token_ids, dtype=torch.long)
         token_embeddings = self.embedding(token_ids)
-        seq_len = len(token_ids)
+        seq_len = token_ids.shape[0] 
+
         pe = self.build_positional_encoding(seq_len)
         pe = torch.tensor(pe, dtype=torch.float32)
         
