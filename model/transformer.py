@@ -34,7 +34,8 @@ class EmbeddingLayer(nn.Module):
             3. Standard Normal - LLMs, emiprically proven:
                 - self.weights = np.random.normal(loc=0.0, scale=0.02, size=(vocab_size, d_model))
         """
-        self.weights = np.random.randn(vocab_size, d_model) * np.sqrt(1.0 / d_model)    # Since I'm doing this just for a personal project, this is ok for now
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        nn.init.normal_(self.embedding.weight, mean=0.0, std=math.sqrt(1.0 / d_model))
 
     
     def positional_encoding(self, pos_index, d_model_index):
@@ -61,9 +62,11 @@ class EmbeddingLayer(nn.Module):
 
 
     def forward(self, token_ids):
-        token_embeddings = self.weights[token_ids]
+        token_embeddings = self.embedding(token_ids)
         seq_len = len(token_ids)
         pe = self.build_positional_encoding(seq_len)
+        pe = torch.tensor(pe, dtype=torch.float32)
+        
         return token_embeddings + pe
 
 
@@ -162,6 +165,37 @@ class TransformerBlock(nn.Module):
         x = self.norm2(ff_output + x)
 
         return x
+
+
+class Transformer(nn.Module):
+    """
+        input token IDs -> outputs logits (unnormalized)
+    """
+    def __init__(self, vocab_size, d_model, num_heads, ffn_dim, num_layers):
+        super().__init__()
+        self.embedding = EmbeddingLayer(vocab_size, d_model)
+        self.blocks = nn.ModuleList([
+            TransformerBlock(d_model, num_heads, ffn_dim)
+            for _ in range(num_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+
+        # Output projection
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+
+    
+    def forward(self, token_ids):
+        x = self.embedding.forward(token_ids)   # [seq_len, d_model]
+        x = x.unsqueeze(0)  # Adds batch dimension -> [1, seq_len, d_model]
+
+        # Application of self-attention
+        for block in self.blocks:
+            x = block(x)
+
+        x = self.norm(x)
+        logits = self.lm_head(x)
+
+        return logits
 
 
 
