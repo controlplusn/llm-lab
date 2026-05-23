@@ -1,11 +1,15 @@
 """
-Config:
-    - vocab_size = 32,000
-    - d_model = 512
-    - num_heads = 8
+Default config (see config.py):
+    vocab_size = 32_000
+    d_model = 512
+    num_heads = 8
+    num_layers = 12
+    ffn_dim = 2048
+    max_seq_len = 1024
 """
 
 import math
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -15,271 +19,191 @@ from config import load_config
 CONFIG = load_config()
 
 
+def _build_sinusoidal_pe(max_seq_len: int, d_model: int) -> np.ndarray:
+    pos = np.arange(max_seq_len)[:, np.newaxis]
+    dim = np.arange(d_model)[np.newaxis, :]
+    i = dim // 2
+    exponent = (2 * i) / d_model
+    angles = pos / np.power(10_000, exponent)
+    return np.where(dim % 2 == 0, np.sin(angles), np.cos(angles)).astype(np.float32)
 
-# Token Embedding Layer
+
 class EmbeddingLayer(nn.Module):
-    # token IDs -> embedding vectors -> positional encoding
-    def __init__(self, vocab_size, d_model):
+    def __init__(self, vocab_size: int, d_model: int, max_seq_len: int, dropout: float = 0.1):
         super().__init__()
-        self.vocab_size = vocab_size
-        self.d_model = d_model
-
-        """
-            1. What I used - too small
-                - self.weights = np.random.randn(vocab_size, d_model) * 0.01 -> stats: mean: -0.0000, std: 0.0100
-            
-            2. Xavier / Glorot Initialization - general use, stable gradients:
-                - self.weights = np.random.randn(vocab_size, d_model) * np.sqrt(1.0 / d_model) -> stats: mean: -0.0000, std: 0.0442
-
-            3. Standard Normal - LLMs, emiprically proven:
-                - self.weights = np.random.normal(loc=0.0, scale=0.02, size=(vocab_size, d_model))
-        """
+        self.max_seq_len = max_seq_len
         self.embedding = nn.Embedding(vocab_size, d_model)
         nn.init.normal_(self.embedding.weight, mean=0.0, std=math.sqrt(1.0 / d_model))
 
-    
-    def positional_encoding(self, pos_index, d_model_index):
-        # pair index -> dim 2i and 2i+1
-        i = d_model_index // 2 
-        exponent = (2 * i) / self.d_model
+        pe = _build_sinusoidal_pe(max_seq_len, d_model)
+        self.register_buffer("pe", torch.from_numpy(pe), persistent=False)
+        self.dropout = nn.Dropout(dropout)
 
-        if d_model_index % 2 == 0:
-            result = math.sin(pos_index / 10_000**exponent)
-        else:
-            result = math.cos(pos_index / 10_000**exponent)
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        # token_ids: [batch, seq_len]
+        if token_ids.dim() == 1:
+            token_ids = token_ids.unsqueeze(0)
 
-        return result
-    
+        batch, seq_len = token_ids.shape
+        if seq_len > self.max_seq_len:
+            raise ValueError(
+                f"Sequence length {seq_len} exceeds max_seq_len {self.max_seq_len}"
+            )
 
-    def build_positional_encoding(self, seq_len):
-        pos = np.arange(seq_len)[:, np.newaxis]         # [seq_len, 1]
-        dim = np.arange(self.d_model)[np.newaxis, :]    # [1, d_model]    
-        
-        i = dim // 2
-        exponent = (2 * i) / self.d_model
-        angles = pos / np.power(10_000, exponent)
-        pe = np.where(dim % 2 == 0, np.sin(angles), np.cos(angles))
-        
-        return pe
-
-
-    def forward(self, token_ids):
-        if not isinstance(token_ids, torch.Tensor):
-            token_ids = torch.tensor(token_ids, dtype=torch.long)
         token_embeddings = self.embedding(token_ids)
-        seq_len = token_ids.shape[0] 
-
-        pe = self.build_positional_encoding(seq_len)
-        pe = torch.tensor(pe, dtype=torch.float32)
-        
-        return token_embeddings + pe
-
+        return self.dropout(token_embeddings + self.pe[:seq_len])
 
 
 class LayerNorm(nn.Module):
-    def __init__(self, d_model):
+    def __init__(self, d_model: int):
         super().__init__()
         self.gamma = nn.Parameter(torch.ones(d_model))
         self.beta = nn.Parameter(torch.zeros(d_model))
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         mean = x.mean(dim=-1, keepdim=True)
-        std = x.std(dim=-1, keepdim=True)
-
-        return self.gamma * (x - mean) / (std + 1e-6) + self.beta
+        var = x.var(dim=-1, keepdim=True, unbiased=False)
+        return self.gamma * (x - mean) / torch.sqrt(var + 1e-6) + self.beta
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, num_heads):
+    def __init__(self, d_model: int, num_heads: int, dropout: float = 0.1):
         super().__init__()
+        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+
         self.d_model = d_model
         self.num_heads = num_heads
-
         self.d_k = d_model // num_heads
 
         self.W_q = nn.Linear(d_model, d_model)
         self.W_k = nn.Linear(d_model, d_model)
         self.W_v = nn.Linear(d_model, d_model)
         self.W_o = nn.Linear(d_model, d_model)
+        self.attn_dropout = nn.Dropout(dropout)
 
-            
-    def forward(self, x):
+    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        # x: [batch, seq_len, d_model]
+        # attn_mask: [batch, seq_len], True = keep token
         batch, seq_len, _ = x.shape
 
-        Q = self.W_q(x)
-        Q = Q.reshape(batch, seq_len, self.num_heads, self.d_k)
-        Q = Q.transpose(1, 2)   # [batch x num_heads x seq_len x d_k]
-        
-        K = self.W_k(x)
-        K = K.reshape(batch, seq_len, self.num_heads, self.d_k)
-        K = K.transpose(1, 2)  
-
-        V = self.W_v(x)
-        V = V.reshape(batch, seq_len, self.num_heads, self.d_k)
-        V = V.transpose(1, 2)
+        Q = self.W_q(x).view(batch, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+        K = self.W_k(x).view(batch, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+        V = self.W_v(x).view(batch, seq_len, self.num_heads, self.d_k).transpose(1, 2)
 
         scale = math.sqrt(self.d_k)
-        attention_score = torch.matmul(Q, K.transpose(-2, -1)) / scale
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / scale
 
-        mask_len = attention_score.shape[-1]
-        causal_mask = torch.triu(torch.ones(mask_len, mask_len), diagonal=1).bool()
+        causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool),
+            diagonal=1,
+        )
+        scores = scores.masked_fill(causal_mask, float("-inf"))
 
-        masked_score = attention_score.masked_fill(causal_mask, float('-inf'))
+        if attn_mask is not None:
+            # Mask padded key positions
+            pad_mask = ~attn_mask.unsqueeze(1).unsqueeze(2)
+            scores = scores.masked_fill(pad_mask, float("-inf"))
 
-        weights = torch.softmax(masked_score, dim=-1)
+        weights = torch.softmax(scores, dim=-1)
+        weights = self.attn_dropout(weights)
+
         context = torch.matmul(weights, V)
-        context = context.transpose(1, 2)                        # [batch × seq_len × num_heads × d_k]
-        context = context.reshape(batch, seq_len, self.d_model)  # [batch × seq_len × d_model]
-
-        output = self.W_o(context)
-
-        return output
+        context = context.transpose(1, 2).contiguous().view(batch, seq_len, self.d_model)
+        return self.W_o(context)
 
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model, ffn_dim):
+    def __init__(self, d_model: int, ffn_dim: int, dropout: float = 0.1):
         super().__init__()
-        self.d_model = d_model
-        self.ffn_dim = ffn_dim
-
-        self.Linear0 = nn.Linear(d_model, ffn_dim)
-        self.Linear1 = nn.Linear(ffn_dim, d_model)
+        self.fc1 = nn.Linear(d_model, ffn_dim)
+        self.fc2 = nn.Linear(ffn_dim, d_model)
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
-        return self.Linear1(self.relu(self.Linear0(x)))
-    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.dropout(self.fc2(self.relu(self.fc1(x))))
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, ffn_dim):
+    # Pre-LN block: x + sublayer(LayerNorm(x))
+
+    def __init__(self, d_model: int, num_heads: int, ffn_dim: int, dropout: float = 0.1):
         super().__init__()
-        self.mha = MultiHeadAttention(d_model, num_heads)
-        self.ffn = FeedForward(d_model, ffn_dim)
+        self.mha = MultiHeadAttention(d_model, num_heads, dropout)
+        self.ffn = FeedForward(d_model, ffn_dim, dropout)
         self.norm1 = LayerNorm(d_model)
         self.norm2 = LayerNorm(d_model)
 
-
-    def forward(self, x):
-        # attention + residual + norm
-        attention_output = self.mha(x)
-        x = self.norm1(attention_output + x)
-
-        # ffn + residual + norm
-        ff_output = self.ffn(x)
-        x = self.norm2(ff_output + x)
-
+    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        x = x + self.mha(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.ffn(self.norm2(x))
         return x
 
 
 class Transformer(nn.Module):
-    """
-        input token IDs -> outputs logits (unnormalized)
-    """
-    def __init__(self, vocab_size, d_model, num_heads, ffn_dim, num_layers):
-        super().__init__()
-        self.embedding = EmbeddingLayer(vocab_size, d_model)
-        self.blocks = nn.ModuleList([
-            TransformerBlock(d_model, num_heads, ffn_dim)
-            for _ in range(num_layers)
-        ])
-        self.norm = LayerNorm(d_model)
+    # Causal language model: token IDs in, logits [batch, seq_len, vocab_size] out
 
-        # Output projection
+    def __init__(
+        self,
+        vocab_size: int,
+        d_model: int,
+        num_heads: int,
+        ffn_dim: int,
+        num_layers: int,
+        max_seq_len: int = 1024,
+        dropout: float = 0.1,
+        weight_tying: bool = True,
+    ):
+        super().__init__()
+        self.max_seq_len = max_seq_len
+        self.embedding = EmbeddingLayer(vocab_size, d_model, max_seq_len, dropout)
+        self.blocks = nn.ModuleList(
+            [
+                TransformerBlock(d_model, num_heads, ffn_dim, dropout)
+                for _ in range(num_layers)
+            ]
+        )
+        self.norm = LayerNorm(d_model)
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
-    
-    def forward(self, token_ids):
-        x = self.embedding.forward(token_ids)   # [seq_len, d_model]
-        x = x.unsqueeze(0)  # Adds batch dimension -> [1, seq_len, d_model]
+        if weight_tying:
+            self.lm_head.weight = self.embedding.embedding.weight
 
-        # Application of self-attention
+    def forward(
+        self,
+        token_ids: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if token_ids.dim() == 1:
+            token_ids = token_ids.unsqueeze(0)
+
+        x = self.embedding(token_ids)
         for block in self.blocks:
-            x = block(x)
+            x = block(x, attn_mask=attn_mask)
 
         x = self.norm(x)
-        logits = self.lm_head(x)
-
-        return logits
-
+        return self.lm_head(x)
 
 
 if __name__ == "__main__":
-    input_ids = CONFIG["input_ids"]     # Sample input for embedding layer
-    d_model = CONFIG["d_model"]
-    vocab_size = CONFIG["vocab_size"]
-    num_heads = CONFIG["num_heads"]
-    ffn_dim = CONFIG["ffn_dim"]
+    cfg = CONFIG
+    batch, seq_len = 2, 16
 
-    batch = 2
-    seq_len = 10
+    model = Transformer(
+        vocab_size=cfg["vocab_size"],
+        d_model=cfg["d_model"],
+        num_heads=cfg["num_heads"],
+        ffn_dim=cfg["ffn_dim"],
+        num_layers=cfg["num_layers"],
+        max_seq_len=cfg["max_seq_len"],
+        dropout=cfg["dropout"],
+        weight_tying=cfg["weight_tying"],
+    )
 
-    dummy_input = torch.randn(batch, seq_len, d_model)
+    input_ids = torch.randint(0, cfg["vocab_size"], (batch, seq_len))
+    logits = model(input_ids)
 
-    # Embedding layer test
-    embedding_layer = EmbeddingLayer(vocab_size, d_model)
-    output_embedding = embedding_layer.forward(input_ids)
-
-    print("="*20)
-    print("Sample Embedding matrix")
-    print("="*20) 
-    print(output_embedding)
-
-    # Expected output: [seq_len x d_model]
-    print(f"Embedding Shape: {output_embedding.shape}")
-
-
-    # Multi-Head Attention test
-    mha = MultiHeadAttention(d_model, num_heads)
-    output_mha = mha.forward(dummy_input)
-    
-    print()
-    print("="*20)
-    print("Sample Multi-Head matrix")
-    print("="*20) 
-    print(output_mha)
-
-    # Expected output: [batch x seq_len x d_model]
-    print(f"Multi-Head Attention Shape: {output_mha.shape}")
-
-
-    # Feed Forward Network test
-    ffn = FeedForward(d_model, ffn_dim)
-    output_ffn = ffn.forward(dummy_input)
-
-    print()
-    print("="*20)
-    print("Sample FFN matrix")
-    print("="*20) 
-    print(output_ffn)
-
-    # Expected output: [batch x seq_len x d_model]
-    print(f"FFN Shape: {output_ffn.shape}") 
-
-
-    # Layer Norm test
-    norm = LayerNorm(d_model)
-    output_norm = norm.forward(dummy_input)
-
-    print()
-    print("="*20)
-    print("Sample Layer Norm matrix")
-    print("="*20) 
-    print(output_norm)
-
-    # Expected output: [batch x seq_len x d_model]
-    print(f"Layer Norm Shape: {output_norm.shape}")
-
-
-    # Transformer Block test
-    transformer = TransformerBlock(d_model, num_heads, ffn_dim)
-    output_transformer = transformer.forward(dummy_input)
-
-    print()
-    print("="*20)
-    print("Sample Transformer Block matrix")
-    print("="*20) 
-    print(output_transformer)
-
-    # Expected output: [batch x seq_len x d_model]
-    print(f"Multi-Head Attention Shape: {output_transformer.shape}")
+    print(f"input_ids: {tuple(input_ids.shape)}")
+    print(f"logits:    {tuple(logits.shape)}")
+    assert logits.shape == (batch, seq_len, cfg["vocab_size"])
+    print("OK — batched forward pass")
