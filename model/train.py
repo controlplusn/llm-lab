@@ -16,6 +16,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
+from checkpoint_utils import find_latest_checkpoint, load_checkpoint, save_checkpoint
 from config import load_config
 from dataset import PackedLMDataset, build_token_cache, causal_lm_loss
 from transformer import Transformer
@@ -26,22 +27,6 @@ def get_lr(step: int, warmup_steps: int, base_lr: float, max_steps: int) -> floa
         return base_lr * step / max(warmup_steps, 1)
     progress = (step - warmup_steps) / max(max_steps - warmup_steps, 1)
     return base_lr * 0.5 * (1.0 + math.cos(math.pi * progress))
-
-
-def save_checkpoint(path: Path, model, optimizer, step: int, cfg: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "step": step,
-        "model": model.state_dict(),
-        "config": {k: cfg[k] for k in (
-            "vocab_size", "d_model", "num_heads", "ffn_dim", "num_layers",
-            "max_seq_len", "dropout", "weight_tying", "eot_token_id",
-        )},
-    }
-    if optimizer is not None:
-        payload["optimizer"] = optimizer.state_dict()
-    torch.save(payload, path)
-    print(f"Saved checkpoint -> {path} ({path.stat().st_size / 1e6:.1f} MB)")
 
 
 def train(cfg: dict, args: argparse.Namespace) -> None:
